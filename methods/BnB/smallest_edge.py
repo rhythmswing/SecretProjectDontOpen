@@ -63,28 +63,3 @@ def tsp_branch_and_bound(tspdata):
 
     _tsp(tspdata, cur_bound, 0, 1, cur_path, visited)
 
-
-def solve(args):
-    data = TSPAllInOne(args.inst)
-    global_counter = ExpRecorder(args.output_path)
-    global_counter.set_timer(args.time)
-
-    try:
-        tsp_branch_and_bound(data)
-    except SearchTimeout:
-        print()
-        print("Exceeded target time. Terminating algorithm.")
-    except KeyboardInterrupt:
-        print()
-        print("Keyboard interrupt accepted. Attempting graceful exit..")
-        global_counter.sol_file += "_int_elapsed_{}".format(global_counter.elapsed_time)
-        global_counter.trace_file += "_int_elapsed_{}".format(global_counter.elapsed_time)
-
-    print()
-    print("Total run time: {:.2f}, reject rate: {:.2f}".format(global_counter.elapsed_time,
-        global_counter.reject_rate))
-    print("Best solution: ")
-    print(data.solution)
-    # TODO: output final solution
-    global_counter.write_solution()
-    global_counter.write_trace()
