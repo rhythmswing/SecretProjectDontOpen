@@ -22,6 +22,10 @@ def parse_arguments():
         '-seed', type=int, default=None
     )
 
+    parser.add_argument(
+        '-bnb_bound', choices=['reduce_matrix', 'smallest_edge'], default='reduce_matrix'
+    )
+
     args = parser.parse_args()
     return args
 
