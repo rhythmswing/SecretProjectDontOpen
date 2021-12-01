@@ -185,7 +185,7 @@ class TSPAllInOne:
 
 
 import sys
-def _tsp(tspdata, cur_bound, cur_weight, level, cur_path, visited):
+def _tsp(tspdata, cur_bound, cur_weight, level, cur_path, visited, dist_mat=None):
     if not global_counter.within_target_time():
         raise SearchTimeout
     sys.stdout.write("\rcurrent best solution: {:.2f}, deepest level: {}, reject rate: {:.2f}%, iter/sec: {:.2f}".format(
@@ -207,17 +207,20 @@ def _tsp(tspdata, cur_bound, cur_weight, level, cur_path, visited):
             temp = cur_bound
             #print('cur weight')
             cur_weight += tspdata.dist(cur_path[level-1], i)
+            dist_mat_, path_bound = reduce_matrix(dist_mat, cur_bound[level-1], i, exclude=False)
+            '''
             #print(cur_weight)
             if level == 1:
                 cur_bound -= 0.5 * (tspdata.first_order_min(cur_path[level-1]) + tspdata.first_order_min(i))
             else:
                 cur_bound -= 0.5 * (tspdata.second_order_min(cur_path[level-1]) + tspdata.first_order_min(i))
+            '''
 
             if cur_bound + cur_weight < tspdata.solution.distance:
                 global_counter.accept()
                 cur_path[level] = i
                 visited[i] = True
-                _tsp(tspdata, cur_bound, cur_weight, level+1, cur_path, visited)
+                _tsp(tspdata, cur_bound, cur_weight, level+1, cur_path, visited, dist_mat_)
             else:
                 global_counter.reject()
             cur_weight -= tspdata.dist(cur_path[level-1], i)
@@ -234,14 +237,15 @@ def tsp_branch_and_bound(tspdata):
     cur_bound = 0
     cur_path = [None] * (tspdata.ncities+1)
     visited = {x: False for x in tspdata.cities}
-    for i in tspdata.cities:
-        cur_bound += (tspdata.first_order_min(i) + tspdata.second_order_min(i))
-    cur_bound = cur_bound // 2
+    #for i in tspdata.cities:
+    #    cur_bound += (tspdata.first_order_min(i) + tspdata.second_order_min(i))
+    #cur_bound = cur_bound // 2
+    reduced_mat, cur_bound = reduce_matrix(tspdata.dist_mat)
     start_city = 0
     visited[tspdata.cities[start_city]] = True
     cur_path[0] = tspdata.cities[start_city]
 
-    _tsp(tspdata, cur_bound, 0, 1, cur_path, visited)
+    _tsp(tspdata, cur_bound, 0, 1, cur_path, visited, reduced_mat)
 
 
 
