@@ -6,42 +6,40 @@ import copy
 
 @dataclass
 class Solution:
+    """ data class containing a solution.
+    """
     path: list
     distance: float
+    def __init__(self, path, distance):
+        self.distance = distance
+        # make sure path is independently stored 
+        self.path = copy.deepcopy(path)
 
 class ExpRecorder:
-    def __init__(self, trace_file=None):
+    """ Maintaining global variables and logs.
+    """
+    def __init__(self, output_file=None):
         self.total = 0
         self.nreject = 0
 
         self.start_time = 0
         self.deepest_level = float('inf')
-        self.trace_file = trace_file
 
-        self.current_best = float('inf')
+        self.current_best = Solution([], float('inf'))
 
-        if trace_file:
-            self.fp = open(trace_file, 'w+')
-        else:
-            self.fp = None
+        if output_file:
+            self.trace_file = output_file + '.trace'
+            self.sol_file = output_file + '.sol'
 
 
         self.history = []
 
     def record(self, best_solution):
-        if not self.fp:
-            return 
-        if best_solution < self.current_best:
+        """ Record a best solution to the output trace file.
+        """
+        if best_solution.distance < self.current_best.distance:
             self.current_best = best_solution
-            self.fp.write("{:.2f}, {}\n".format(
-                self.elapsed_time, self.current_best
-            ))
-
             self.history.append([self.elapsed_time, self.current_best])
-
-    def close(self):
-        if self.fp:
-            self.fp.close()
 
     def set_level(self, level):
         if level < self.deepest_level:
@@ -73,11 +71,37 @@ class ExpRecorder:
         else:
             return True
 
+    def write_trace(self):
+        with open(self.trace_file, 'w+') as f:
+            for timestep, sol in self.history:
+                f.write("{:.2f}, {}\n".format(
+                    timestep, int(sol.distance)
+                ))
+
+    def write_solution(self):
+        with open(self.sol_file, 'w+') as f:
+            f.write("{}\n{}\n".format(
+                int(self.current_best.distance),
+                ",".join(map(str, self.current_best.path))
+            ))
+
 class SearchTimeout(Exception):
+    # Dummy exception class for calling timeout 
     pass
 
 
 def reduce_matrix(d_matrix, src=None, dst=None, exclude=False):
+    """ Reduce a distance matrix for TSP branch and bound.
+
+    Args:
+        d_matrix (np.array): distance matrix.
+        src (int, optional): source node. Defaults to None.
+        dst ([type], optional): destination node. Defaults to None.
+        exclude (bool, optional): if the computation of lower bound includes or excludes node. Defaults to False.
+
+    Returns:
+        [np.array, float]: reduced matrix and cost.
+    """
     if int(src is None) + int(dst is None) == 1:
         raise ValueError
 
@@ -85,10 +109,13 @@ def reduce_matrix(d_matrix, src=None, dst=None, exclude=False):
         # reduce row wise
         cost = 0
         reduced_cost = np.min(d_matrix, axis=1)
+        reduced_cost[reduced_cost==float('inf')]=0
         d_matrix = (d_matrix.T - reduced_cost).T
+        # remove nan caused by min([inf, inf])
         cost += reduced_cost.sum()
         # reduce col wise
         reduced_cost = np.min(d_matrix, axis=0)
+        reduced_cost[reduced_cost==float('inf')]=0
         d_matrix -= reduced_cost 
         cost += reduced_cost.sum()
         return d_matrix, cost
@@ -102,8 +129,8 @@ def reduce_matrix(d_matrix, src=None, dst=None, exclude=False):
     def reduce_matrix_include_(d_matrix, src, dst):
         d_matrix = copy.deepcopy(d_matrix)
         d_matrix[dst, src] = float('inf')
-        d_matrix = np.delete(d_matrix, src, 0)
-        d_matrix = np.delete(d_matrix, dst, 1)
+        d_matrix[src, :] = float('inf')
+        d_matrix[:, dst] = float('inf')
         return simple_reduce_(d_matrix)
 
     if src is None and dst is None:
@@ -194,20 +221,29 @@ def _tsp(tspdata, cur_bound, cur_weight, level, cur_path, visited, dist_mat=None
     ))
     sys.stdout.flush()
     if level == tspdata.ncities:
-        if tspdata.dist(cur_path[level-1], cur_path[0]) < float('inf'):
-            cur_res = cur_weight + tspdata.dist(cur_path[level-1], cur_path[0])
-            if cur_res < tspdata.solution.distance:
-                global_counter.record(cur_res)
-                tspdata.solution.distance = cur_res
-                tspdata.solution.path = cur_path
+        cur_res = cur_weight + tspdata.dist(cur_path[level-1], cur_path[0])
+        if cur_res < tspdata.solution.distance:
+            tspdata.solution = Solution(cur_path, cur_res)
+            global_counter.record(tspdata.solution)
         return 
 
+    all_reject = False
     for i in tspdata.cities:
         if visited[i] == False:
+            if all_reject:
+                global_counter.reject()
+                continue
             temp = cur_bound
             #print('cur weight')
+            srcid = tspdata.city2id[cur_path[level-1]]
+            tgtid = tspdata.city2id[i]
             cur_weight += tspdata.dist(cur_path[level-1], i)
-            dist_mat_, path_bound = reduce_matrix(dist_mat, cur_bound[level-1], i, exclude=False)
+            dist_mat_, cur_bound_add = reduce_matrix(dist_mat,
+              srcid, tgtid, exclude=False)
+            #_, cur_bound_exclude_add = reduce_matrix(dist_mat, srcid, tgtid,
+            #    exclude=True)
+            cur_bound = temp + cur_bound_add + dist_mat[srcid, tgtid]
+            #cur_bound_exclude = temp + cur_bound_exclude_add
             '''
             #print(cur_weight)
             if level == 1:
@@ -215,14 +251,15 @@ def _tsp(tspdata, cur_bound, cur_weight, level, cur_path, visited, dist_mat=None
             else:
                 cur_bound -= 0.5 * (tspdata.second_order_min(cur_path[level-1]) + tspdata.first_order_min(i))
             '''
-
-            if cur_bound + cur_weight < tspdata.solution.distance:
+            if cur_bound < tspdata.solution.distance:
                 global_counter.accept()
                 cur_path[level] = i
                 visited[i] = True
                 _tsp(tspdata, cur_bound, cur_weight, level+1, cur_path, visited, dist_mat_)
             else:
                 global_counter.reject()
+                #if cur_bound_exclude > tspdata.solution.distance:
+                #    all_reject = True
             cur_weight -= tspdata.dist(cur_path[level-1], i)
             cur_bound = temp
 
@@ -235,13 +272,13 @@ def _tsp(tspdata, cur_bound, cur_weight, level, cur_path, visited, dist_mat=None
 def tsp_branch_and_bound(tspdata):
 
     cur_bound = 0
-    cur_path = [None] * (tspdata.ncities+1)
+    cur_path = [None] * (tspdata.ncities)
     visited = {x: False for x in tspdata.cities}
     #for i in tspdata.cities:
     #    cur_bound += (tspdata.first_order_min(i) + tspdata.second_order_min(i))
     #cur_bound = cur_bound // 2
     reduced_mat, cur_bound = reduce_matrix(tspdata.dist_mat)
-    start_city = 0
+    start_city = 10
     visited[tspdata.cities[start_city]] = True
     cur_path[0] = tspdata.cities[start_city]
 
@@ -255,7 +292,7 @@ global_counter = None
 def solve(args):
     global data, global_counter
     data = TSPAllInOne(args.inst)
-    global_counter = ExpRecorder(args.output_path+'.trace')
+    global_counter = ExpRecorder(args.output_path)
     global_counter.set_timer(args.time)
 
     try:
@@ -263,8 +300,17 @@ def solve(args):
     except SearchTimeout:
         print()
         print("Exceeded target time. Terminating algorithm.")
+    except KeyboardInterrupt:
+        print()
+        print("Keyboard interrupt accepted. Attempting graceful exit..")
+        global_counter.sol_file += "_int_elapsed_{}".format(global_counter.elapsed_time)
+        global_counter.trace_file += "_int_elapsed_{}".format(global_counter.elapsed_time)
 
+    print()
+    print("Total run time: {:.2f}, reject rate: {:.2f}".format(global_counter.elapsed_time,
+        global_counter.reject_rate))
+    print("Best solution: ")
     print(data.solution)
     # TODO: output final solution
-
-    global_counter.close()
+    global_counter.write_solution()
+    global_counter.write_trace()
